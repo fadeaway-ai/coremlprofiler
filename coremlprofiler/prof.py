@@ -1,7 +1,15 @@
 import os
 from pathlib import Path
 from Foundation import NSURL
-from CoreML import MLModel, MLModelConfiguration, MLComputePlan
+from CoreML import (
+    MLModel,
+    MLModelConfiguration,
+    MLComputePlan,
+    MLComputeUnits,
+    MLCPUComputeDevice,
+    MLGPUComputeDevice,
+    MLNeuralEngineComputeDevice,
+)
 from PyObjCTools import AppHelper
 import enum
 from colorama import Fore, Style
@@ -18,12 +26,6 @@ class ComputeDevice(enum.Enum):
 
     @classmethod
     def from_pyobjc(cls, device):
-        from CoreML import (
-            MLCPUComputeDevice,
-            MLGPUComputeDevice,
-            MLNeuralEngineComputeDevice,
-        )
-
         if isinstance(device, MLCPUComputeDevice):
             return cls.CPU
         elif isinstance(device, MLGPUComputeDevice):
@@ -48,9 +50,26 @@ class DeviceUsage(dict):
         return ", ".join(f"{device}: {count}" for device, count in self.items())
 
 
+class ComputeUnitSetting(enum.Enum):
+    ALL = "all"
+    CPU_AND_GPU = "cpuAndGPU"
+    CPU_AND_NE = "cpuAndNeuralEngine"
+    CPU_ONLY = "cpuOnly"
+
+    def to_compute_units(self):
+        # MLComputeUnits is a NewType that wraps integers
+        return MLComputeUnits({
+            ComputeUnitSetting.ALL: 0,
+            ComputeUnitSetting.CPU_AND_GPU: 1,
+            ComputeUnitSetting.CPU_AND_NE: 2,
+            ComputeUnitSetting.CPU_ONLY: 3,
+        }[self])
+
+
 class CoreMLProfiler:
-    def __init__(self, model_path: str):
+    def __init__(self, model_path: str, compute_units: ComputeUnitSetting = ComputeUnitSetting.ALL):
         self.model_url = self._validate_and_prepare_model(model_path)
+        self.compute_units = compute_units
         self.compute_plan = None
         self.device_usage = None
 
@@ -86,6 +105,7 @@ class CoreMLProfiler:
     def _create_compute_plan(self):
         """Create a compute plan for the model."""
         config = MLModelConfiguration.alloc().init()
+        config.setComputeUnits_(self.compute_units.to_compute_units())
         MLComputePlan.loadContentsOfURL_configuration_completionHandler_(
             self.model_url, config, self._handle_compute_plan
         )
